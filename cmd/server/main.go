@@ -21,7 +21,8 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	cfg := config.Load()
+	cfg, err := config.Load()
+	must(err)
 	repo, err := repository.NewPostgres(ctx, cfg.DatabaseURL)
 	must(err)
 	defer repo.Close()
@@ -31,11 +32,12 @@ func main() {
 	must(err)
 	defer events.Close()
 	svc := service.NewAvatarService(repo, objects, events)
-	handler := api.NewHandler(svc, func() map[string]string {
+	logger := slog.Default()
+	handler := api.NewHandler(svc, logger, func() map[string]string {
 		out := map[string]string{"database": "up", "s3": "up", "broker": "up"}
 		c, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		if repo.Pool.Ping(c) != nil {
+		if repo.Ping(c) != nil {
 			out["database"] = "down"
 		}
 		if objects.Ping(c) != nil {

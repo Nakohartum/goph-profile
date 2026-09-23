@@ -12,7 +12,7 @@ import (
 	"goph-profile/internal/domain"
 )
 
-type Postgres struct{ Pool *pgxpool.Pool }
+type Postgres struct{ pool *pgxpool.Pool }
 
 func NewPostgres(ctx context.Context, url string) (*Postgres, error) {
 	p, e := pgxpool.New(ctx, url)
@@ -23,11 +23,12 @@ func NewPostgres(ctx context.Context, url string) (*Postgres, error) {
 		p.Close()
 		return nil, e
 	}
-	return &Postgres{Pool: p}, nil
+	return &Postgres{pool: p}, nil
 }
-func (p *Postgres) Close() { p.Pool.Close() }
+func (p *Postgres) Close()                         { p.pool.Close() }
+func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 func (p *Postgres) Create(ctx context.Context, a *domain.Avatar) error {
-	_, e := p.Pool.Exec(ctx, `INSERT INTO avatars(id,user_id,file_name,mime_type,size_bytes,s3_key,upload_status,processing_status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, a.ID, a.UserID, a.FileName, a.MIMEType, a.SizeBytes, a.S3Key, a.UploadStatus, a.ProcessingStatus, a.CreatedAt, a.UpdatedAt)
+	_, e := p.pool.Exec(ctx, `INSERT INTO avatars(id,user_id,file_name,mime_type,size_bytes,s3_key,upload_status,processing_status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, a.ID, a.UserID, a.FileName, a.MIMEType, a.SizeBytes, a.S3Key, a.UploadStatus, a.ProcessingStatus, a.CreatedAt, a.UpdatedAt)
 	return e
 }
 
@@ -51,10 +52,10 @@ func scanAvatar(row pgx.Row) (*domain.Avatar, error) {
 	return &a, nil
 }
 func (p *Postgres) Get(ctx context.Context, id string) (*domain.Avatar, error) {
-	return scanAvatar(p.Pool.QueryRow(ctx, selectAvatar, id))
+	return scanAvatar(p.pool.QueryRow(ctx, selectAvatar, id))
 }
 func (p *Postgres) ListByUser(ctx context.Context, user string) ([]domain.Avatar, error) {
-	rows, e := p.Pool.Query(ctx, `SELECT id,user_id,file_name,mime_type,size_bytes,s3_key,thumbnail_s3_keys,upload_status,processing_status,width,height,created_at,updated_at FROM avatars WHERE user_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC`, user)
+	rows, e := p.pool.Query(ctx, `SELECT id,user_id,file_name,mime_type,size_bytes,s3_key,thumbnail_s3_keys,upload_status,processing_status,width,height,created_at,updated_at FROM avatars WHERE user_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC`, user)
 	if e != nil {
 		return nil, e
 	}
@@ -70,14 +71,14 @@ func (p *Postgres) ListByUser(ctx context.Context, user string) ([]domain.Avatar
 	return out, rows.Err()
 }
 func (p *Postgres) SoftDelete(ctx context.Context, id string) error {
-	tag, e := p.Pool.Exec(ctx, `UPDATE avatars SET deleted_at=NOW(),updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id)
+	tag, e := p.pool.Exec(ctx, `UPDATE avatars SET deleted_at=NOW(),updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id)
 	if e == nil && tag.RowsAffected() == 0 {
 		return domain.ErrNotFound
 	}
 	return e
 }
 func (p *Postgres) BeginProcessing(ctx context.Context, id, msg string) (bool, error) {
-	tag, e := p.Pool.Exec(ctx, `UPDATE avatars SET processing_status='processing',processing_message_id=$2,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND processing_status IN ('pending','failed')`, id, msg)
+	tag, e := p.pool.Exec(ctx, `UPDATE avatars SET processing_status='processing',processing_message_id=$2,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND processing_status IN ('pending','failed')`, id, msg)
 	return e == nil && tag.RowsAffected() == 1, e
 }
 func (p *Postgres) CompleteProcessing(ctx context.Context, id string, w, h int, thumbs map[string]string) error {
@@ -85,10 +86,10 @@ func (p *Postgres) CompleteProcessing(ctx context.Context, id string, w, h int, 
 	if e != nil {
 		return e
 	}
-	_, e = p.Pool.Exec(ctx, `UPDATE avatars SET processing_status='completed',thumbnail_s3_keys=$2,width=$3,height=$4,updated_at=NOW() WHERE id=$1`, id, b, w, h)
+	_, e = p.pool.Exec(ctx, `UPDATE avatars SET processing_status='completed',thumbnail_s3_keys=$2,width=$3,height=$4,updated_at=NOW() WHERE id=$1`, id, b, w, h)
 	return e
 }
 func (p *Postgres) FailProcessing(ctx context.Context, id string) error {
-	_, e := p.Pool.Exec(ctx, `UPDATE avatars SET processing_status='failed',updated_at=NOW() WHERE id=$1`, id)
+	_, e := p.pool.Exec(ctx, `UPDATE avatars SET processing_status='failed',updated_at=NOW() WHERE id=$1`, id)
 	return e
 }

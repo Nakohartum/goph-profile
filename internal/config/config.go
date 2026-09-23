@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -10,23 +12,50 @@ type Config struct {
 	S3UseSSL                                                                         bool
 }
 
-func Load() Config {
-	return Config{HTTPAddr: get("HTTP_ADDR", ":8080"), DatabaseURL: get("DATABASE_URL", "postgres://goph:goph@localhost:5432/gophprofile?sslmode=disable"), S3Endpoint: get("S3_ENDPOINT", "localhost:9000"), S3AccessKey: get("S3_ACCESS_KEY", "minioadmin"), S3SecretKey: get("S3_SECRET_KEY", "minioadmin"), S3Bucket: get("S3_BUCKET", "avatars"), RabbitURL: get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"), S3UseSSL: getBool("S3_USE_SSL", false)}
+func Load() (Config, error) {
+	databaseURL, err := required("DATABASE_URL")
+	if err != nil {
+		return Config{}, err
+	}
+	s3AccessKey, err := required("S3_ACCESS_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	s3SecretKey, err := required("S3_SECRET_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	rabbitURL, err := required("RABBITMQ_URL")
+	if err != nil {
+		return Config{}, err
+	}
+	s3UseSSL, err := getBool("S3_USE_SSL", false)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{HTTPAddr: get("HTTP_ADDR", ":8080"), DatabaseURL: databaseURL, S3Endpoint: get("S3_ENDPOINT", "localhost:9000"), S3AccessKey: s3AccessKey, S3SecretKey: s3SecretKey, S3Bucket: get("S3_BUCKET", "avatars"), RabbitURL: rabbitURL, S3UseSSL: s3UseSSL}, nil
 }
 func get(k, d string) string {
-	if v := os.Getenv(k); v != "" {
+	if v, ok := os.LookupEnv(k); ok {
 		return v
 	}
 	return d
 }
-func getBool(k string, d bool) bool {
-	v := os.Getenv(k)
-	if v == "" {
-		return d
+func required(k string) (string, error) {
+	v, ok := os.LookupEnv(k)
+	if !ok || strings.TrimSpace(v) == "" {
+		return "", fmt.Errorf("required environment variable %s is not set", k)
+	}
+	return v, nil
+}
+func getBool(k string, d bool) (bool, error) {
+	v, ok := os.LookupEnv(k)
+	if !ok {
+		return d, nil
 	}
 	b, e := strconv.ParseBool(v)
 	if e != nil {
-		return d
+		return false, fmt.Errorf("parse %s: %w", k, e)
 	}
-	return b
+	return b, nil
 }

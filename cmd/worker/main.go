@@ -20,7 +20,8 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	cfg := config.Load()
+	cfg, err := config.Load()
+	must(err)
 	repo, err := repository.NewPostgres(ctx, cfg.DatabaseURL)
 	must(err)
 	defer repo.Close()
@@ -52,7 +53,9 @@ func main() {
 				if processErr == nil {
 					break
 				}
-				time.Sleep(time.Duration(1<<attempt) * time.Second)
+				if attempt < 2 && !waitForRetry(ctx, time.Duration(1<<attempt)*time.Second) {
+					return
+				}
 			}
 			if processErr != nil {
 				slog.Error("processing failed", "avatar_id", event.AvatarID, "error", processErr)
@@ -61,6 +64,16 @@ func main() {
 				_ = d.Ack(false)
 			}
 		}
+	}
+}
+func waitForRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 func must(err error) {
