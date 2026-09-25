@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	HTTPAddr, DatabaseURL, S3Endpoint, S3AccessKey, S3SecretKey, S3Bucket, RabbitURL string
+	OTLPEndpoint, LogLevel                                                           string
 	S3UseSSL                                                                         bool
 }
 
@@ -33,7 +34,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{HTTPAddr: get("HTTP_ADDR", ":8080"), DatabaseURL: databaseURL, S3Endpoint: get("S3_ENDPOINT", "localhost:9000"), S3AccessKey: s3AccessKey, S3SecretKey: s3SecretKey, S3Bucket: get("S3_BUCKET", "avatars"), RabbitURL: rabbitURL, S3UseSSL: s3UseSSL}, nil
+	return Config{HTTPAddr: get("HTTP_ADDR", ":8080"), DatabaseURL: databaseURL, S3Endpoint: get("S3_ENDPOINT", "localhost:9000"), S3AccessKey: s3AccessKey, S3SecretKey: s3SecretKey, S3Bucket: get("S3_BUCKET", "avatars"), RabbitURL: rabbitURL, S3UseSSL: s3UseSSL, OTLPEndpoint: get("OTEL_EXPORTER_OTLP_ENDPOINT", "jaeger:4318"), LogLevel: get("LOG_LEVEL", "INFO")}, nil
 }
 func get(k, d string) string {
 	if v, ok := os.LookupEnv(k); ok {

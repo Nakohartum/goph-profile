@@ -7,11 +7,15 @@ import (
 	"image"
 	"image/jpeg"
 	_ "image/png"
+	"time"
 
 	"github.com/disintegration/imaging"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	_ "golang.org/x/image/webp"
 
 	"goph-profile/internal/domain"
+	"goph-profile/internal/observability"
 	"goph-profile/internal/ports"
 )
 
@@ -23,7 +27,19 @@ type Processor struct {
 func NewProcessor(r ports.AvatarRepository, s ports.ObjectStorage) *Processor {
 	return &Processor{r, s}
 }
-func (p *Processor) Handle(ctx context.Context, e domain.ProcessEvent) error {
+func (p *Processor) Handle(ctx context.Context, e domain.ProcessEvent) (err error) {
+	ctx, span := otel.Tracer("goph-profile/worker").Start(ctx, "avatar.process")
+	span.SetAttributes(attribute.String("avatar.id", e.AvatarID), attribute.String("messaging.message.id", e.MessageID), attribute.String("action", e.Action))
+	started := time.Now()
+	status := "success"
+	defer func() {
+		if err != nil {
+			status = "error"
+		}
+		observability.Processing.WithLabelValues(e.Action, status).Inc()
+		observability.ProcessingDuration.WithLabelValues(e.Action, status).Observe(time.Since(started).Seconds())
+		observability.End(span, err)
+	}()
 	if e.Action == "delete" {
 		keys := e.S3Keys
 		if len(keys) == 0 {

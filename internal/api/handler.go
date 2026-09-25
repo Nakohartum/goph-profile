@@ -9,11 +9,16 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"goph-profile/internal/domain"
+	"goph-profile/internal/observability"
 	"goph-profile/internal/service"
 )
 
@@ -29,7 +34,8 @@ func NewHandler(s AvatarService, logger *slog.Logger, health func() map[string]s
 	}
 	h := &Handler{service: s, logger: logger, health: health}
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Compress(5))
+	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, h.metricsMiddleware, middleware.Compress(5))
+	r.Handle("/metrics", promhttp.Handler())
 	r.Get("/health", h.healthcheck)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/avatars", h.upload)
@@ -43,14 +49,45 @@ func NewHandler(s AvatarService, logger *slog.Logger, health func() map[string]s
 	r.Get("/web/upload", h.uploadPage)
 	r.Post("/web/upload", h.upload)
 	r.Get("/web/gallery/{userID}", h.galleryPage)
-	return r
+	return otelhttp.NewHandler(r, "http.request")
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (h *Handler) metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		status := sw.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		route := chi.RouteContext(r.Context()).RoutePattern()
+		if route == "" {
+			route = "unmatched"
+		}
+		observability.ObserveHTTP("goph-profile-server", r.Method, route, status, started)
+		observability.Logger(r.Context(), h.logger).Info("http request", "method", r.Method, "route", route, "status", strconv.Itoa(status), "duration_ms", time.Since(started).Milliseconds())
+	})
 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
-func (h *Handler) writeError(w http.ResponseWriter, e error) {
+func (h *Handler) writeError(ctx context.Context, w http.ResponseWriter, e error) {
 	status := http.StatusInternalServerError
 	msg := http.StatusText(http.StatusInternalServerError)
 	switch {
@@ -68,19 +105,20 @@ func (h *Handler) writeError(w http.ResponseWriter, e error) {
 		msg = e.Error()
 	}
 	if status >= http.StatusInternalServerError {
-		h.logger.Error("request failed", "status", status, "error", e)
+		// The HTTP middleware adds trace identifiers to the completion log.
+		observability.Logger(ctx, h.logger).Error("request failed", "status", status, "error", e)
 	}
 	writeJSON(w, status, map[string]any{"error": msg})
 }
 func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, service.MaxUploadSize+(1<<20))
 	if e := r.ParseMultipartForm(service.MaxUploadSize); e != nil {
-		h.writeError(w, service.ErrFileTooLarge)
+		h.writeError(r.Context(), w, service.ErrFileTooLarge)
 		return
 	}
 	f, head, e := r.FormFile("file")
 	if e != nil {
-		h.writeError(w, service.ErrEmptyFile)
+		h.writeError(r.Context(), w, service.ErrEmptyFile)
 		return
 	}
 	defer func() { _ = f.Close() }()
@@ -90,7 +128,7 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	a, e := h.service.Upload(r.Context(), user, head.Filename, f, head.Size)
 	if e != nil {
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": a.ID, "user_id": a.UserID, "url": "/api/v1/avatars/" + a.ID, "status": a.ProcessingStatus, "created_at": a.CreatedAt})
@@ -103,7 +141,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	a, body, ct, e := h.service.Get(r.Context(), chi.URLParam(r, "id"), size)
 	if e != nil {
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	defer func() { _ = body.Close() }()
@@ -115,7 +153,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) metadata(w http.ResponseWriter, r *http.Request) {
 	a, e := h.service.Metadata(r.Context(), chi.URLParam(r, "id"))
 	if e != nil {
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
@@ -123,14 +161,14 @@ func (h *Handler) metadata(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	items, e := h.service.List(r.Context(), chi.URLParam(r, "userID"))
 	if e != nil {
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
 }
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	if e := h.service.Delete(r.Context(), chi.URLParam(r, "id"), r.Header.Get("X-User-ID")); e != nil {
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -141,7 +179,7 @@ func (h *Handler) latest(w http.ResponseWriter, r *http.Request) {
 		if e == nil {
 			e = domain.ErrNotFound
 		}
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	rctx := chi.NewRouteContext()
@@ -155,7 +193,7 @@ func contextWithRoute(r *http.Request, rc *chi.Context) context.Context {
 func (h *Handler) deleteLatest(w http.ResponseWriter, r *http.Request) {
 	user := chi.URLParam(r, "userID")
 	if r.Header.Get("X-User-ID") != user {
-		h.writeError(w, domain.ErrForbidden)
+		h.writeError(r.Context(), w, domain.ErrForbidden)
 		return
 	}
 	items, e := h.service.List(r.Context(), user)
@@ -163,11 +201,11 @@ func (h *Handler) deleteLatest(w http.ResponseWriter, r *http.Request) {
 		if e == nil {
 			e = domain.ErrNotFound
 		}
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	if e = h.service.Delete(r.Context(), items[0].ID, user); e != nil {
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -194,7 +232,7 @@ func (h *Handler) galleryPage(w http.ResponseWriter, r *http.Request) {
 	user := chi.URLParam(r, "userID")
 	items, e := h.service.List(r.Context(), user)
 	if e != nil {
-		h.writeError(w, e)
+		h.writeError(r.Context(), w, e)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
