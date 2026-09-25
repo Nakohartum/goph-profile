@@ -13,6 +13,7 @@ import (
 	"goph-profile/internal/api"
 	"goph-profile/internal/broker"
 	"goph-profile/internal/config"
+	"goph-profile/internal/observability"
 	"goph-profile/internal/repository"
 	"goph-profile/internal/service"
 	"goph-profile/internal/storage"
@@ -23,6 +24,11 @@ func main() {
 	defer stop()
 	cfg, err := config.Load()
 	must(err)
+	logger := observability.NewLogger("goph-profile-server", cfg.LogLevel)
+	slog.SetDefault(logger)
+	shutdownTracing, err := observability.Setup(ctx, "goph-profile-server", cfg.OTLPEndpoint)
+	must(err)
+	defer observability.Shutdown(context.Background(), shutdownTracing, logger)
 	repo, err := repository.NewPostgres(ctx, cfg.DatabaseURL)
 	must(err)
 	defer repo.Close()
@@ -32,7 +38,6 @@ func main() {
 	must(err)
 	defer events.Close()
 	svc := service.NewAvatarService(repo, objects, events)
-	logger := slog.Default()
 	handler := api.NewHandler(svc, logger, func() map[string]string {
 		out := map[string]string{"database": "up", "s3": "up", "broker": "up"}
 		c, cancel := context.WithTimeout(context.Background(), time.Second)
