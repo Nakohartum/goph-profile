@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,13 +25,14 @@ type Handler struct {
 	service AvatarService
 	logger  *slog.Logger
 	health  func() map[string]string
+	metrics *observability.Metrics
 }
 
-func NewHandler(s AvatarService, logger *slog.Logger, health func() map[string]string) http.Handler {
+func NewHandler(s AvatarService, logger *slog.Logger, health func() map[string]string, metrics *observability.Metrics) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &Handler{service: s, logger: logger, health: health}
+	h := &Handler{service: s, logger: logger, health: health, metrics: metrics}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, h.metricsMiddleware, middleware.Compress(5))
 	r.Handle("/metrics", promhttp.Handler())
@@ -78,8 +78,7 @@ func (h *Handler) metricsMiddleware(next http.Handler) http.Handler {
 		if route == "" {
 			route = "unmatched"
 		}
-		observability.ObserveHTTP("goph-profile-server", r.Method, route, status, started)
-		observability.Logger(r.Context(), h.logger).Info("http request", "method", r.Method, "route", route, "status", strconv.Itoa(status), "duration_ms", time.Since(started).Milliseconds())
+		h.metrics.ObserveHTTP("goph-profile-server", r.Method, route, status, started)
 	})
 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -105,8 +104,7 @@ func (h *Handler) writeError(ctx context.Context, w http.ResponseWriter, e error
 		msg = e.Error()
 	}
 	if status >= http.StatusInternalServerError {
-		// The HTTP middleware adds trace identifiers to the completion log.
-		observability.Logger(ctx, h.logger).Error("request failed", "status", status, "error", e)
+		observability.WithTrace(ctx, h.logger).Error("request failed", "status", status, "error", e)
 	}
 	writeJSON(w, status, map[string]any{"error": msg})
 }

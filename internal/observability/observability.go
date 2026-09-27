@@ -44,7 +44,7 @@ func NewLogger(service, level string) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l})).With("service", service)
 }
 
-func Logger(ctx context.Context, base *slog.Logger) *slog.Logger {
+func WithTrace(ctx context.Context, base *slog.Logger) *slog.Logger {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
 		return base

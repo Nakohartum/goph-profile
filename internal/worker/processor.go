@@ -22,10 +22,11 @@ import (
 type Processor struct {
 	repo    ports.AvatarRepository
 	storage ports.ObjectStorage
+	metrics *observability.Metrics
 }
 
-func NewProcessor(r ports.AvatarRepository, s ports.ObjectStorage) *Processor {
-	return &Processor{r, s}
+func NewProcessor(r ports.AvatarRepository, s ports.ObjectStorage, metrics *observability.Metrics) *Processor {
+	return &Processor{repo: r, storage: s, metrics: metrics}
 }
 func (p *Processor) Handle(ctx context.Context, e domain.ProcessEvent) (err error) {
 	ctx, span := otel.Tracer("goph-profile/worker").Start(ctx, "avatar.process")
@@ -36,8 +37,8 @@ func (p *Processor) Handle(ctx context.Context, e domain.ProcessEvent) (err erro
 		if err != nil {
 			status = "error"
 		}
-		observability.Processing.WithLabelValues(e.Action, status).Inc()
-		observability.ProcessingDuration.WithLabelValues(e.Action, status).Observe(time.Since(started).Seconds())
+		p.metrics.Processing.WithLabelValues(e.Action, status).Inc()
+		p.metrics.ProcessingDuration.WithLabelValues(e.Action, status).Observe(time.Since(started).Seconds())
 		observability.End(span, err)
 	}()
 	if e.Action == "delete" {

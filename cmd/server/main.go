@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"goph-profile/internal/api"
 	"goph-profile/internal/broker"
 	"goph-profile/internal/config"
@@ -29,15 +31,17 @@ func main() {
 	shutdownTracing, err := observability.Setup(ctx, "goph-profile-server", cfg.OTLPEndpoint)
 	must(err)
 	defer observability.Shutdown(context.Background(), shutdownTracing, logger)
-	repo, err := repository.NewPostgres(ctx, cfg.DatabaseURL)
+	metrics, err := observability.NewMetrics(prometheus.DefaultRegisterer)
+	must(err)
+	repo, err := repository.NewPostgres(ctx, cfg.DatabaseURL, metrics)
 	must(err)
 	defer repo.Close()
 	objects, err := storage.NewMinIO(ctx, cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL)
 	must(err)
-	events, err := broker.NewRabbit(cfg.RabbitURL)
+	events, err := broker.NewRabbit(cfg.RabbitURL, metrics)
 	must(err)
 	defer events.Close()
-	svc := service.NewAvatarService(repo, objects, events)
+	svc := service.NewAvatarService(repo, objects, events, metrics)
 	handler := api.NewHandler(svc, logger, func() map[string]string {
 		out := map[string]string{"database": "up", "s3": "up", "broker": "up"}
 		c, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -52,7 +56,7 @@ func main() {
 			out["broker"] = "down"
 		}
 		return out
-	})
+	}, metrics)
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		slog.Info("server started", "addr", cfg.HTTPAddr)

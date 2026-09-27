@@ -9,11 +9,22 @@ import (
 	"io"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/mock/gomock"
 
 	"goph-profile/internal/domain"
 	"goph-profile/internal/mocks"
+	"goph-profile/internal/observability"
 )
+
+func testMetrics(t *testing.T) *observability.Metrics {
+	t.Helper()
+	metrics, err := observability.NewMetrics(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return metrics
+}
 
 func pngData() []byte {
 	var b bytes.Buffer
@@ -24,7 +35,7 @@ func TestProcessAndIdempotency(t *testing.T) {
 	c := gomock.NewController(t)
 	r := mocks.NewMockAvatarRepository(c)
 	s := mocks.NewMockObjectStorage(c)
-	p := NewProcessor(r, s)
+	p := NewProcessor(r, s, testMetrics(t))
 	e := domain.ProcessEvent{MessageID: "message", AvatarID: "avatar", S3Key: "original", Action: "process"}
 	r.EXPECT().BeginProcessing(gomock.Any(), "avatar", "message").Return(true, nil)
 	s.EXPECT().Get(gomock.Any(), "original").Return(io.NopCloser(bytes.NewReader(pngData())), "image/png", nil)
@@ -44,7 +55,7 @@ func TestDelete(t *testing.T) {
 	s := mocks.NewMockObjectStorage(c)
 	s.EXPECT().Delete(gomock.Any(), "a").Return(nil)
 	s.EXPECT().Delete(gomock.Any(), "b").Return(nil)
-	if err := NewProcessor(r, s).Handle(context.Background(), domain.ProcessEvent{Action: "delete", S3Keys: []string{"a", "b"}}); err != nil {
+	if err := NewProcessor(r, s, testMetrics(t)).Handle(context.Background(), domain.ProcessEvent{Action: "delete", S3Keys: []string{"a", "b"}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -55,7 +66,7 @@ func TestDecodeFailureMarksFailed(t *testing.T) {
 	r.EXPECT().BeginProcessing(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 	s.EXPECT().Get(gomock.Any(), "bad").Return(io.NopCloser(bytes.NewReader([]byte("bad"))), "", nil)
 	r.EXPECT().FailProcessing(gomock.Any(), gomock.Any()).Return(nil)
-	err := NewProcessor(r, s).Handle(context.Background(), domain.ProcessEvent{Action: "process", S3Key: "bad"})
+	err := NewProcessor(r, s, testMetrics(t)).Handle(context.Background(), domain.ProcessEvent{Action: "process", S3Key: "bad"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -65,7 +76,7 @@ func TestDeleteFailure(t *testing.T) {
 	r := mocks.NewMockAvatarRepository(c)
 	s := mocks.NewMockObjectStorage(c)
 	s.EXPECT().Delete(gomock.Any(), "a").Return(errors.New("failed"))
-	if err := NewProcessor(r, s).Handle(context.Background(), domain.ProcessEvent{Action: "delete", S3Key: "a"}); err == nil {
+	if err := NewProcessor(r, s, testMetrics(t)).Handle(context.Background(), domain.ProcessEvent{Action: "delete", S3Key: "a"}); err == nil {
 		t.Fatal("expected error")
 	}
 }

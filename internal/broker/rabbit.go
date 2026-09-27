@@ -17,8 +17,9 @@ import (
 const Queue = "avatar.processing"
 
 type Rabbit struct {
-	conn *amqp091.Connection
-	ch   *amqp091.Channel
+	conn    *amqp091.Connection
+	ch      *amqp091.Channel
+	metrics *observability.Metrics
 }
 
 type tableCarrier amqp091.Table
@@ -44,7 +45,7 @@ func ExtractContext(ctx context.Context, headers amqp091.Table) context.Context 
 
 func (r *Rabbit) Healthy() bool { return !r.conn.IsClosed() }
 
-func NewRabbit(url string) (*Rabbit, error) {
+func NewRabbit(url string, metrics *observability.Metrics) (*Rabbit, error) {
 	c, e := amqp091.Dial(url)
 	if e != nil {
 		return nil, e
@@ -59,7 +60,7 @@ func NewRabbit(url string) (*Rabbit, error) {
 		_ = c.Close()
 		return nil, e
 	}
-	return &Rabbit{c, ch}, nil
+	return &Rabbit{conn: c, ch: ch, metrics: metrics}, nil
 }
 func (r *Rabbit) Close() { _ = r.ch.Close(); _ = r.conn.Close() }
 func (r *Rabbit) Publish(ctx context.Context, event domain.ProcessEvent) error {
@@ -77,9 +78,9 @@ func (r *Rabbit) Publish(ctx context.Context, event domain.ProcessEvent) error {
 		status = "error"
 		span.RecordError(e)
 	}
-	observability.QueuePublished.WithLabelValues(status).Inc()
+	r.metrics.QueuePublished.WithLabelValues(status).Inc()
 	if q, inspectErr := r.ch.QueueInspect(Queue); inspectErr == nil {
-		observability.QueueDepth.Set(float64(q.Messages))
+		r.metrics.QueueDepth.Set(float64(q.Messages))
 	}
 	return e
 }

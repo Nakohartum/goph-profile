@@ -33,10 +33,11 @@ type AvatarService struct {
 	repo      ports.AvatarRepository
 	storage   ports.ObjectStorage
 	publisher ports.EventPublisher
+	metrics   *observability.Metrics
 }
 
-func NewAvatarService(r ports.AvatarRepository, s ports.ObjectStorage, p ports.EventPublisher) *AvatarService {
-	return &AvatarService{repo: r, storage: s, publisher: p}
+func NewAvatarService(r ports.AvatarRepository, s ports.ObjectStorage, p ports.EventPublisher, metrics *observability.Metrics) *AvatarService {
+	return &AvatarService{repo: r, storage: s, publisher: p, metrics: metrics}
 }
 
 func (s *AvatarService) Upload(ctx context.Context, userID, fileName string, data io.Reader, declaredSize int64) (avatar *domain.Avatar, err error) {
@@ -47,8 +48,8 @@ func (s *AvatarService) Upload(ctx context.Context, userID, fileName string, dat
 		if err != nil {
 			status = "error"
 		}
-		observability.Uploads.WithLabelValues(status).Inc()
-		observability.UploadDuration.WithLabelValues(status).Observe(time.Since(started).Seconds())
+		s.metrics.Uploads.WithLabelValues(status).Inc()
+		s.metrics.UploadDuration.WithLabelValues(status).Observe(time.Since(started).Seconds())
 		observability.End(span, err)
 	}()
 	span.SetAttributes(attribute.String("user.id", userID), attribute.String("file.name", filepath.Base(fileName)), attribute.Int64("file.size", declaredSize))
@@ -86,7 +87,7 @@ func (s *AvatarService) Upload(ctx context.Context, userID, fileName string, dat
 	if err = s.storage.Put(ctx, key, bytes.NewReader(b), int64(len(b)), mimeType); err != nil {
 		return nil, fmt.Errorf("store avatar: %w", err)
 	}
-	observability.StorageBytes.Add(float64(len(b)))
+	s.metrics.UploadedBytes.Add(float64(len(b)))
 	if err = s.repo.Create(ctx, a); err != nil {
 		_ = s.storage.Delete(ctx, key)
 		return nil, fmt.Errorf("create metadata: %w", err)
