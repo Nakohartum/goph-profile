@@ -9,10 +9,12 @@ import (
 	"io"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/mock/gomock"
 
 	"goph-profile/internal/domain"
 	"goph-profile/internal/mocks"
+	"goph-profile/internal/observability"
 )
 
 func imageBytes() []byte {
@@ -26,7 +28,11 @@ func testService(t *testing.T) (*AvatarService, *mocks.MockAvatarRepository, *mo
 	r := mocks.NewMockAvatarRepository(c)
 	s := mocks.NewMockObjectStorage(c)
 	p := mocks.NewMockEventPublisher(c)
-	return NewAvatarService(r, s, p), r, s, p
+	metrics, err := observability.NewMetrics(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewAvatarService(r, s, p, metrics), r, s, p
 }
 func expectUpload(r *mocks.MockAvatarRepository, s *mocks.MockObjectStorage, p *mocks.MockEventPublisher) {
 	s.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), "image/png").Return(nil)

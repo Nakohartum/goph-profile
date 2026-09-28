@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: GophProfile
+    folder: GophProfile
+    type: file
+    options: {path: /var/lib/grafana/dashboards}

@@ -12,8 +12,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"goph-profile/internal/domain"
+	"goph-profile/internal/observability"
 	"goph-profile/internal/ports"
 )
 
@@ -30,13 +33,26 @@ type AvatarService struct {
 	repo      ports.AvatarRepository
 	storage   ports.ObjectStorage
 	publisher ports.EventPublisher
+	metrics   *observability.Metrics
 }
 
-func NewAvatarService(r ports.AvatarRepository, s ports.ObjectStorage, p ports.EventPublisher) *AvatarService {
-	return &AvatarService{repo: r, storage: s, publisher: p}
+func NewAvatarService(r ports.AvatarRepository, s ports.ObjectStorage, p ports.EventPublisher, metrics *observability.Metrics) *AvatarService {
+	return &AvatarService{repo: r, storage: s, publisher: p, metrics: metrics}
 }
 
-func (s *AvatarService) Upload(ctx context.Context, userID, fileName string, data io.Reader, declaredSize int64) (*domain.Avatar, error) {
+func (s *AvatarService) Upload(ctx context.Context, userID, fileName string, data io.Reader, declaredSize int64) (avatar *domain.Avatar, err error) {
+	ctx, span := otel.Tracer("goph-profile/service").Start(ctx, "avatar.upload")
+	started := time.Now()
+	status := "success"
+	defer func() {
+		if err != nil {
+			status = "error"
+		}
+		s.metrics.Uploads.WithLabelValues(status).Inc()
+		s.metrics.UploadDuration.WithLabelValues(status).Observe(time.Since(started).Seconds())
+		observability.End(span, err)
+	}()
+	span.SetAttributes(attribute.String("user.id", userID), attribute.String("file.name", filepath.Base(fileName)), attribute.Int64("file.size", declaredSize))
 	if strings.TrimSpace(userID) == "" {
 		return nil, ErrEmptyUserID
 	}
@@ -71,6 +87,7 @@ func (s *AvatarService) Upload(ctx context.Context, userID, fileName string, dat
 	if err = s.storage.Put(ctx, key, bytes.NewReader(b), int64(len(b)), mimeType); err != nil {
 		return nil, fmt.Errorf("store avatar: %w", err)
 	}
+	s.metrics.UploadedBytes.Add(float64(len(b)))
 	if err = s.repo.Create(ctx, a); err != nil {
 		_ = s.storage.Delete(ctx, key)
 		return nil, fmt.Errorf("create metadata: %w", err)
@@ -82,6 +99,9 @@ func (s *AvatarService) Upload(ctx context.Context, userID, fileName string, dat
 }
 
 func (s *AvatarService) Get(ctx context.Context, id, size string) (*domain.Avatar, io.ReadCloser, string, error) {
+	ctx, span := otel.Tracer("goph-profile/service").Start(ctx, "avatar.get")
+	defer span.End()
+	span.SetAttributes(attribute.String("avatar.id", id), attribute.String("avatar.size", size))
 	a, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return nil, nil, "", err
@@ -98,12 +118,19 @@ func (s *AvatarService) Get(ctx context.Context, id, size string) (*domain.Avata
 	return a, r, ct, err
 }
 func (s *AvatarService) Metadata(ctx context.Context, id string) (*domain.Avatar, error) {
+	ctx, span := otel.Tracer("goph-profile/service").Start(ctx, "avatar.metadata")
+	defer span.End()
 	return s.repo.Get(ctx, id)
 }
 func (s *AvatarService) List(ctx context.Context, user string) ([]domain.Avatar, error) {
+	ctx, span := otel.Tracer("goph-profile/service").Start(ctx, "avatar.list")
+	defer span.End()
 	return s.repo.ListByUser(ctx, user)
 }
 func (s *AvatarService) Delete(ctx context.Context, id, user string) error {
+	ctx, span := otel.Tracer("goph-profile/service").Start(ctx, "avatar.delete")
+	defer span.End()
+	span.SetAttributes(attribute.String("avatar.id", id), attribute.String("user.id", user))
 	if strings.TrimSpace(user) == "" {
 		return ErrEmptyUserID
 	}

@@ -1,0 +1,21 @@
+groups:
+  - name: goph-profile
+    rules:
+      - alert: GophProfileHighErrorRate
+        expr: sum(rate(gophprofile_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(gophprofile_http_requests_total[5m])), 0.001) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "GophProfile HTTP error rate exceeds 10%"
+      - alert: GophProfileHighResponseTime
+        expr: histogram_quantile(0.95, sum by (le) (rate(gophprofile_http_request_duration_seconds_bucket[5m]))) > 5
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "GophProfile p95 response time exceeds 5 seconds"
+      - alert: GophProfileTargetDown
+        expr: up{job=~"goph-profile-.*"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "A GophProfile metrics target is down"

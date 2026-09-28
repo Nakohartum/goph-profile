@@ -202,4 +202,20 @@ go build -o bin/server ./cmd/server
 go build -o bin/worker ./cmd/worker
 ```
 
+## Observability
+
+The observability stack starts with the application via `docker compose up --build`:
+
+- Grafana: <http://localhost:3000> (`admin`, password from `GRAFANA_PASSWORD`)
+- Prometheus: <http://localhost:9090>
+- Jaeger: <http://localhost:16686>
+- Alertmanager: <http://localhost:9093>
+- Loki API: <http://localhost:3100>
+
+Grafana provisions Prometheus, Loki, and Jaeger data sources and the **GophProfile Service Overview** dashboard automatically. It includes RED metrics, business KPIs, PostgreSQL pool utilization, RabbitMQ queue depth, and correlated JSON logs. A log's `trace_id` links to the matching Jaeger trace.
+
+The server exposes `GET /metrics`; the worker exposes metrics on its internal port `9091`. W3C Trace Context propagates from an HTTP request through PostgreSQL, MinIO, and RabbitMQ to the worker. `LOG_LEVEL` controls structured JSON log verbosity.
+
+Prometheus alert rules for error rate, p95 latency, and unavailable targets are in `deploy/prometheus/alerts.yml`. The default Alertmanager receiver is intentionally local; configure a webhook, email, or chat receiver for production notifications.
+
 Для запуска бинарников без Compose дополнительно нужны доступные PostgreSQL, MinIO и RabbitMQ, а также переменные `DATABASE_URL`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET` и `RABBITMQ_URL`.

@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/mock/gomock"
 
 	"goph-profile/internal/domain"
+	"goph-profile/internal/observability"
 )
 
 func testHandler(t *testing.T, state string) (http.Handler, *MockAvatarService, *bytes.Buffer) {
@@ -22,7 +24,11 @@ func testHandler(t *testing.T, state string) (http.Handler, *MockAvatarService, 
 	service := NewMockAvatarService(gomock.NewController(t))
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	handler := NewHandler(service, logger, func() map[string]string { return map[string]string{"database": state} })
+	metrics, err := observability.NewMetrics(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(service, logger, func() map[string]string { return map[string]string{"database": state} }, metrics)
 	return handler, service, &logs
 }
 

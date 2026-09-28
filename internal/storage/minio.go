@@ -7,6 +7,9 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"goph-profile/internal/domain"
 )
@@ -14,6 +17,10 @@ import (
 type MinIO struct {
 	client *minio.Client
 	bucket string
+}
+
+func (m *MinIO) span(ctx context.Context, operation, key string) (context.Context, trace.Span) {
+	return otel.Tracer("goph-profile/s3").Start(ctx, "s3."+operation, trace.WithAttributes(attribute.String("rpc.system", "aws-api"), attribute.String("rpc.service", "S3"), attribute.String("s3.bucket", m.bucket), attribute.String("s3.key", key)))
 }
 
 func (m *MinIO) Ping(ctx context.Context) error {
@@ -38,10 +45,15 @@ func NewMinIO(ctx context.Context, endpoint, access, secret, bucket string, ssl 
 	return &MinIO{c, bucket}, nil
 }
 func (m *MinIO) Put(ctx context.Context, key string, r io.Reader, n int64, ct string) error {
+	ctx, span := m.span(ctx, "put_object", key)
+	defer span.End()
+	span.SetAttributes(attribute.Int64("object.size", n))
 	_, e := m.client.PutObject(ctx, m.bucket, key, r, n, minio.PutObjectOptions{ContentType: ct})
 	return e
 }
 func (m *MinIO) Get(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	ctx, span := m.span(ctx, "get_object", key)
+	defer span.End()
 	o, e := m.client.GetObject(ctx, m.bucket, key, minio.GetObjectOptions{})
 	if e != nil {
 		return nil, "", e
@@ -58,5 +70,7 @@ func (m *MinIO) Get(ctx context.Context, key string) (io.ReadCloser, string, err
 	return o, st.ContentType, nil
 }
 func (m *MinIO) Delete(ctx context.Context, key string) error {
+	ctx, span := m.span(ctx, "delete_object", key)
+	defer span.End()
 	return m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{})
 }
