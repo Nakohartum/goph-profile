@@ -36,6 +36,10 @@ func NewHandler(s AvatarService, logger *slog.Logger, health func() map[string]s
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, h.metricsMiddleware, middleware.Compress(5))
 	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/live", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	r.Get("/ready", h.healthcheck)
 	r.Get("/health", h.healthcheck)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/avatars", h.upload)

@@ -1,0 +1,60 @@
+openapi: 3.0.3
+info: {title: GophProfile API, version: 1.0.0}
+servers: [{url: /api/v1}]
+paths:
+  /avatars:
+    post:
+      summary: Upload an avatar
+      parameters: [{$ref: '#/components/parameters/UserID'}]
+      requestBody:
+        required: true
+        content: {multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: string, format: binary}}}}}
+      responses: {'201': {description: Accepted}, '400': {$ref: '#/components/responses/BadRequest'}, '413': {description: File exceeds 10 MiB}}
+  /avatars/{id}:
+    parameters: [{$ref: '#/components/parameters/AvatarID'}]
+    get:
+      summary: Get original or resized avatar
+      parameters: [{name: size, in: query, schema: {type: string, enum: [original, 100x100, 300x300]}}]
+      responses: {'200': {description: Image bytes}, '404': {$ref: '#/components/responses/NotFound'}}
+    delete:
+      summary: Delete an owned avatar
+      parameters: [{$ref: '#/components/parameters/UserID'}]
+      responses: {'204': {description: Deleted}, '403': {description: Forbidden}, '404': {$ref: '#/components/responses/NotFound'}}
+  /avatars/{id}/metadata:
+    get:
+      summary: Get avatar metadata
+      parameters: [{$ref: '#/components/parameters/AvatarID'}]
+      responses: {'200': {description: Metadata, content: {application/json: {schema: {$ref: '#/components/schemas/Avatar'}}}}, '404': {$ref: '#/components/responses/NotFound'}}
+  /users/{userID}/avatars:
+    get:
+      summary: List user avatars
+      parameters: [{$ref: '#/components/parameters/UserPathID'}]
+      responses: {'200': {description: Avatar list, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Avatar'}}}}}}
+  /users/{userID}/avatar:
+    parameters: [{$ref: '#/components/parameters/UserPathID'}]
+    get: {summary: Get latest user avatar, responses: {'200': {description: Image bytes}, '404': {$ref: '#/components/responses/NotFound'}}}
+    delete:
+      summary: Delete latest user avatar
+      parameters: [{$ref: '#/components/parameters/UserID'}]
+      responses: {'204': {description: Deleted}, '403': {description: Forbidden}, '404': {$ref: '#/components/responses/NotFound'}}
+components:
+  parameters:
+    AvatarID: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    UserPathID: {name: userID, in: path, required: true, schema: {type: string}}
+    UserID: {name: X-User-ID, in: header, required: true, schema: {type: string}}
+  responses:
+    BadRequest: {description: Invalid input}
+    NotFound: {description: Not found}
+  schemas:
+    Avatar:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string}
+        file_name: {type: string}
+        mime_type: {type: string}
+        size_bytes: {type: integer, format: int64}
+        processing_status: {type: string, enum: [pending, processing, completed, failed]}
+        width: {type: integer}
+        height: {type: integer}
+        created_at: {type: string, format: date-time}

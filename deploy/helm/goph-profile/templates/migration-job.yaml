@@ -1,0 +1,35 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "goph-profile.fullname" . }}-migrate
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels: {{- include "goph-profile.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 70, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: migrate
+          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag }}"
+          imagePullPolicy: {{ .Values.migrations.image.pullPolicy }}
+          command: ["/bin/sh", "-ec"]
+          args: ['psql "$DATABASE_URL" --set ON_ERROR_STOP=1 --file /migrations/001_init.sql']
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ include "goph-profile.secretName" . }}, key: database-url}}
+          volumeMounts: [{name: migrations, mountPath: /migrations, readOnly: true}]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+      volumes:
+        - name: migrations
+          configMap: {name: {{ include "goph-profile.fullname" . }}-migrations}
+{{- end }}

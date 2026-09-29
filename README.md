@@ -219,3 +219,39 @@ The server exposes `GET /metrics`; the worker exposes metrics on its internal po
 Prometheus alert rules for error rate, p95 latency, and unavailable targets are in `deploy/prometheus/alerts.yml`. The default Alertmanager receiver is intentionally local; configure a webhook, email, or chat receiver for production notifications.
 
 Для запуска бинарников без Compose дополнительно нужны доступные PostgreSQL, MinIO и RabbitMQ, а также переменные `DATABASE_URL`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET` и `RABBITMQ_URL`.
+
+## Kubernetes and Helm
+
+Prerequisites: Kubernetes 1.25+, an Ingress controller, Metrics Server for HPA, and Prometheus Operator CRDs when `serviceMonitor.enabled=true`. PostgreSQL, RabbitMQ, MinIO/S3 and the OTLP collector are configured as external dependencies.
+
+```bash
+docker build -t goph-profile:latest .
+helm upgrade --install goph-profile deploy/helm/goph-profile \
+  --namespace goph-profile --create-namespace \
+  -f deploy/helm/goph-profile/values-dev.yaml \
+  --set secrets.databaseURL='postgresql://...' \
+  --set secrets.s3AccessKey='...' \
+  --set secrets.s3SecretKey='...' \
+  --set secrets.rabbitmqURL='amqp://...'
+kubectl get pods,hpa,ingress -n goph-profile
+```
+
+In production, create a Secret with keys `database-url`, `s3-access-key`, `s3-secret-key`, and `rabbitmq-url`, then set `secrets.existingSecret`. Do not pass production credentials on the command line. Narrow `networkPolicy.egressCIDRs` to the dependency networks.
+
+The chart deploys separate server and worker Deployments and HPAs, Services, Ingress, PDBs, a ServiceAccount without token mounting, restricted non-root security contexts, NetworkPolicy, ServiceMonitors, and an idempotent migration hook. `/live` checks the process; `/ready` checks dependencies. Graceful shutdown is bounded by the pod termination grace period.
+
+```mermaid
+flowchart LR
+  Client --> Ingress --> Service --> Server[Server pods / HPA]
+  Server --> PostgreSQL
+  Server --> MinIO
+  Server --> RabbitMQ --> Worker[Worker pods / HPA]
+  Worker --> PostgreSQL
+  Worker --> MinIO
+  Prometheus -->|ServiceMonitor /metrics| Server
+  Prometheus -->|ServiceMonitor /metrics| Worker
+  Server -->|OTLP| Collector
+  Worker -->|OTLP| Collector
+```
+
+The API contract is in [`docs/openapi.yaml`](docs/openapi.yaml). Alert rules are in `deploy/prometheus/alerts.yml`, and the Grafana dashboard is in `deploy/grafana/dashboards/goph-profile.json`.

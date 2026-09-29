@@ -1,0 +1,17 @@
+image:
+  tag: stable
+  pullPolicy: IfNotPresent
+secrets:
+  existingSecret: goph-profile-secrets
+  databaseURL: ""
+  s3AccessKey: ""
+  s3SecretKey: ""
+  rabbitmqURL: ""
+server:
+  replicaCount: 3
+worker:
+  replicaCount: 3
+ingress:
+  hosts:
+    - host: avatars.example.com
+      paths: [{path: /, pathType: Prefix}]
