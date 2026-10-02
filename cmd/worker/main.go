@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,7 +24,6 @@ import (
 )
 
 func main() {
-	var eventsReady atomic.Bool
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cfg, err := config.Load()
@@ -37,28 +35,6 @@ func main() {
 	defer observability.Shutdown(context.Background(), shutdownTracing, logger)
 	metrics, err := observability.NewMetrics(prometheus.DefaultRegisterer)
 	must(err)
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.Handler())
-	metricsMux.HandleFunc("/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	metricsMux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
-		if !eventsReady.Load() {
-			http.Error(w, "not ready", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	})
-	metricsServer := &http.Server{Addr: ":9091", Handler: metricsMux, ReadHeaderTimeout: 5 * time.Second}
-	go func() {
-		if serveErr := metricsServer.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			logger.Error("metrics server failed", "error", serveErr)
-			stop()
-		}
-	}()
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = metricsServer.Shutdown(shutdownCtx)
-	}()
 	repo, err := repository.NewPostgres(ctx, cfg.DatabaseURL, metrics)
 	must(err)
 	defer repo.Close()
@@ -69,7 +45,24 @@ func main() {
 	defer events.Close()
 	deliveries, err := events.Consume()
 	must(err)
-	eventsReady.Store(true)
+	readiness := newWorkerReadiness(ctx, repo, objects, events, deliveries)
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsMux.HandleFunc("/live", liveness)
+	metricsMux.HandleFunc("/ready", readiness.handler)
+	metricsServer := &http.Server{Addr: ":9091", Handler: metricsMux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if serveErr := metricsServer.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			logger.Error("metrics server failed", "error", serveErr)
+			stop()
+		}
+	}()
+	defer func() {
+		readiness.stop()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = metricsServer.Shutdown(shutdownCtx)
+	}()
 	processor := workerapp.NewProcessor(repo, objects, metrics)
 	for {
 		select {
@@ -77,6 +70,7 @@ func main() {
 			return
 		case d, ok := <-deliveries:
 			if !ok {
+				readiness.stop()
 				return
 			}
 			messageCtx := broker.ExtractContext(ctx, d.Headers)

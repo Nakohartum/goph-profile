@@ -89,8 +89,8 @@ networkPolicy:
 migrations:
   enabled: true
   image:
-    repository: postgres
-    tag: "17-alpine"
+    repository: goph-profile-migrations
+    tag: latest
     pullPolicy: IfNotPresent
 
 podAnnotations: {}

@@ -226,6 +226,7 @@ Prerequisites: Kubernetes 1.25+, an Ingress controller, Metrics Server for HPA, 
 
 ```bash
 docker build -t goph-profile:latest .
+docker build --target migrations -t goph-profile-migrations:latest .
 helm upgrade --install goph-profile deploy/helm/goph-profile \
   --namespace goph-profile --create-namespace \
   -f deploy/helm/goph-profile/values-dev.yaml \
@@ -238,7 +239,7 @@ kubectl get pods,hpa,ingress -n goph-profile
 
 In production, create a Secret with keys `database-url`, `s3-access-key`, `s3-secret-key`, and `rabbitmq-url`, then set `secrets.existingSecret`. Do not pass production credentials on the command line. Narrow `networkPolicy.egressCIDRs` to the dependency networks.
 
-The chart deploys separate server and worker Deployments and HPAs, Services, Ingress, PDBs, a ServiceAccount without token mounting, restricted non-root security contexts, NetworkPolicy, ServiceMonitors, and an idempotent migration hook. `/live` checks the process; `/ready` checks dependencies. Graceful shutdown is bounded by the pod termination grace period.
+The chart deploys separate server and worker Deployments and HPAs, Services, Ingress, PDBs, a ServiceAccount without token mounting, restricted non-root security contexts, NetworkPolicy, ServiceMonitors, and an idempotent migration hook. The migration image is built from the canonical files in `migrations/`, so the database schema has a single source of truth. `/live` checks the process; `/ready` checks dependencies. Graceful shutdown is bounded by the pod termination grace period.
 
 ```mermaid
 flowchart LR

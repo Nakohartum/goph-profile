@@ -1,6 +1,9 @@
 image:
   tag: stable
   pullPolicy: IfNotPresent
+migrations:
+  image:
+    tag: stable
 secrets:
   existingSecret: goph-profile-secrets
   databaseURL: ""

@@ -36,9 +36,7 @@ func NewHandler(s AvatarService, logger *slog.Logger, health func() map[string]s
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, h.metricsMiddleware, middleware.Compress(5))
 	r.Handle("/metrics", promhttp.Handler())
-	r.Get("/live", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	r.Get("/live", h.liveness)
 	r.Get("/ready", h.healthcheck)
 	r.Get("/health", h.healthcheck)
 	r.Route("/api/v1", func(r chi.Router) {
@@ -225,6 +223,10 @@ func (h *Handler) healthcheck(w http.ResponseWriter, _ *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, map[string]any{"status": map[bool]string{true: "ok", false: "degraded"}[ok], "components": components})
+}
+
+func (h *Handler) liveness(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 func (h *Handler) uploadPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
