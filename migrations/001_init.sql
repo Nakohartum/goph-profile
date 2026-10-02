@@ -1,4 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 DO $$ BEGIN
  CREATE TYPE upload_status AS ENUM ('uploading', 'uploaded', 'failed');
 EXCEPTION WHEN duplicate_object THEN NULL;

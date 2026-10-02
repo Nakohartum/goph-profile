@@ -32,6 +32,14 @@ func testHandler(t *testing.T, state string) (http.Handler, *MockAvatarService, 
 	return handler, service, &logs
 }
 
+func TestLiveness(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	(&Handler{}).liveness(recorder, httptest.NewRequest(http.MethodGet, "/live", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("liveness returned %d", recorder.Code)
+	}
+}
+
 func TestHealthAndUploadPage(t *testing.T) {
 	h, _, _ := testHandler(t, "up")
 	for _, path := range []string{"/health", "/web/upload"} {

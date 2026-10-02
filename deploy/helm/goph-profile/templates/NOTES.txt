@@ -1,0 +1,4 @@
+Check the rollout:
+  kubectl get pods,hpa -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Open http://{{ (index .Values.ingress.hosts 0).host }}/health after configuring local DNS.

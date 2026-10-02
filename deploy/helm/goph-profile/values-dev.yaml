@@ -1,0 +1,14 @@
+server:
+  replicaCount: 1
+  autoscaling: {enabled: false}
+worker:
+  replicaCount: 1
+  autoscaling: {enabled: false}
+serviceMonitor:
+  enabled: false
+networkPolicy:
+  enabled: false
+ingress:
+  hosts:
+    - host: goph-profile.local
+      paths: [{path: /, pathType: Prefix}]

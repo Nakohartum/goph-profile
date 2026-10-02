@@ -5,6 +5,10 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
+
+FROM postgres:17-alpine AS migrations
+COPY migrations /migrations
+
 FROM alpine:3.22
 RUN apk --no-cache add ca-certificates tzdata && addgroup -S app && adduser -S -G app app
 WORKDIR /app

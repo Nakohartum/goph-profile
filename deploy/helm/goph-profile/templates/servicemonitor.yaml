@@ -1,0 +1,31 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "goph-profile.fullname" . }}
+  labels: {{- include "goph-profile.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.additionalLabels }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "goph-profile.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: server
+  endpoints:
+    - {port: http, path: /metrics, interval: {{ .Values.serviceMonitor.interval }}}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "goph-profile.fullname" . }}-worker
+  labels: {{- include "goph-profile.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.additionalLabels }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "goph-profile.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  endpoints:
+    - {port: metrics, path: /metrics, interval: {{ .Values.serviceMonitor.interval }}}
+{{- end }}
